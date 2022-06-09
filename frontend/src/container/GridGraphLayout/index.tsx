@@ -65,9 +65,52 @@ function GridGraph(props: Props): JSX.Element {
 	const { widgets } = data;
 	const dispatch = useDispatch<Dispatch<AppActions>>();
 
-	const [layouts, setLayout] = useState<LayoutProps[]>(
-		getPreLayouts(widgets, selectedDashboard.data.layout || []),
-	);
+		// when the layout is not present
+		if (data.layout === undefined) {
+			return widgets.map((e, index) => {
+				return {
+					h: 2,
+					w: 6,
+					y: Infinity,
+					i: (index + 1).toString(),
+					x: (index % 2) * 6,
+					Component: (): JSX.Element => (
+						<Graph
+							name={`${e.id + index}non-expanded`}
+							isDeleted={isDeleted}
+							widget={widgets[index]}
+							yAxisUnit={e.yAxisUnit}
+						/>
+					),
+				};
+			});
+		}
+
+		return widgets.map((widget, index) => {
+			const allLayouts = data?.layout;
+			const lastLayout = (data?.layout || [])[(allLayouts?.length || 0) - 1];
+
+			const currentLayout = (allLayouts || [])[index] || {
+				h: lastLayout.h,
+				i: widget.id,
+				w: lastLayout.w,
+				x: (lastLayout.x % 2) * 6,
+				y: lastLayout.y,
+			};
+
+			return {
+				...currentLayout,
+				Component: (): JSX.Element => (
+					<Graph
+						name={widget.id + index}
+						isDeleted={isDeleted}
+						widget={widget}
+						yAxisUnit={widget.yAxisUnit}
+					/>
+				),
+			};
+		});
+	}, [widgets, data.layout]);
 
 	useEffect(() => {
 		(async (): Promise<void> => {
@@ -104,28 +147,34 @@ function GridGraph(props: Props): JSX.Element {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
-	const onLayoutSaveHandler = useCallback(
-		async (layout: Layout[]) => {
-			try {
-				setSaveLayoutState((state) => ({
-					...state,
-					error: false,
-					errorMessage: '',
-					loading: true,
-				}));
-
-				// Save layout only when users has the has the permission to do so.
-				if (saveLayoutPermission) {
-					const response = await updateDashboardApi({
-						data: {
-							title: data.title,
-							description: data.description,
-							name: data.name,
-							tags: data.tags,
-							widgets: data.widgets,
-							layout,
-						},
-						uuid: selectedDashboard.uuid,
+	const onDropHandler = useCallback(
+		async (allLayouts: Layout[], currentLayout: Layout, event: DragEvent) => {
+			event.preventDefault();
+			if (event.dataTransfer) {
+				try {
+					const graphType = event.dataTransfer.getData('text') as GRAPH_TYPES;
+					const generateWidgetId = v4();
+					
+					await updateDashboard({
+						data,
+						generateWidgetId,
+						graphType,
+						selectedDashboard,
+						layout: allLayouts
+							.map((e, index) => ({
+								...e,
+								i: index.toString(),
+								// when a new element drops
+								w: e.i === '__dropping-elem__' ? 6 : e.w,
+								h: e.i === '__dropping-elem__' ? 2 : e.h,
+							}))
+							// removing add widgets layout config
+							.filter((e) => e.maxW === undefined),
+					});
+				} catch (error) {
+					notification.error({
+						message:
+							error instanceof Error ? error.toString() : 'Something went wrong',
 					});
 					if (response.statusCode === 200) {
 						setSaveLayoutState((state) => ({

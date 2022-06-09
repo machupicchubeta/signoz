@@ -1,5 +1,6 @@
 import { Typography } from 'antd';
-import getQueryResult from 'api/widgets/getQuery';
+import { AxiosError } from 'axios';
+import { ChartData } from 'chart.js';
 import Spinner from 'components/Spinner';
 import GridGraphComponent from 'container/GridGraphComponent';
 import getChartData from 'lib/getChartData';
@@ -16,10 +17,12 @@ import {
 	DeleteWidget,
 	DeleteWidgetProps,
 } from 'store/actions/dashboard/deleteWidget';
+import { GetMetricQueryRange, GetQueryResults, GetQueryResultsProps } from 'store/actions/dashboard/getQueryResults';
 import { AppState } from 'store/reducers';
 import AppActions from 'types/actions';
 import { GlobalTime } from 'types/actions/globalTime';
 import { Widgets } from 'types/api/dashboard/getAll';
+import { GlobalReducer } from 'types/reducer/globalTime';
 
 import { LayoutProps } from '..';
 import EmptyWidget from '../EmptyWidget';
@@ -40,32 +43,75 @@ function GridCardGraph({
 	const { minTime, maxTime } = useSelector<AppState, GlobalTime>(
 		(state) => state.globalTime,
 	);
-	const [deleteModal, setDeleteModal] = useState(false);
+	const { selectedTime: globalSelectedInterval } = useSelector<
+		AppState,
+		GlobalReducer
+	>((state) => state.globalTime);
+	const [deleteModal, setDeletModal] = useState(false);
 
-	const getMaxMinTime = GetMaxMinTime({
-		graphType: widget?.panelTypes,
-		maxTime,
-		minTime,
-	});
+	useEffect(() => {
+		(async (): Promise<void> => {
+			try {
+				const getMaxMinTime = GetMaxMinTime({
+					graphType: widget?.panelTypes,
+					maxTime,
+					minTime,
+				});
 
-	const { start, end } = GetStartAndEndTime({
-		type: widget?.timePreferance,
-		maxTime: getMaxMinTime.maxTime,
-		minTime: getMaxMinTime.minTime,
-	});
+				const { start, end } = GetStartAndEndTime({
+					type: widget.timePreferance,
+					maxTime: getMaxMinTime.maxTime,
+					minTime: getMaxMinTime.minTime,
+				});
 
-	const queryLength = widget?.query?.filter((e) => e.query.length !== 0) || [];
+				const response = await GetMetricQueryRange({
+					selectedTime: widget.timePreferance,
+					graphType: widget.panelTypes,
+					query: widget.query,
+					globalSelectedInterval,
+				})
 
-	const response = useQueries(
-		queryLength?.map((query) => {
-			return {
-				// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
-				queryFn: () => {
-					return getQueryResult({
-						end,
-						query: query?.query,
-						start,
-						step: '60',
+				// await Promise.all(
+				// 	widget.query
+				// 		.map(async (query) => {
+				// 			const result = await GetQueryResults({
+				// 				end,
+				// 				query: encodeURIComponent(query.query),
+				// 				start,
+
+				// 				query: selectedWidget?.query || [],
+				// 				selectedTime: selectedTime.enum,
+				// 				widgetId: selectedWidget?.id || '',
+				// 				graphType: selectedGraph,
+				// 				globalSelectedInterval,
+				// 			});
+
+				// 			return {
+				// 				query: query.query,
+				// 				queryData: result,
+				// 				legend: query.legend,
+				// 			};
+				// 		}),
+				// );
+
+				const isError = response.error;
+
+				if (isError != null) {
+					setState((state) => ({
+						...state,
+						error: true,
+						errorMessage: isError.queryData.error || 'Something went wrong',
+						loading: false,
+					}));
+				} else {
+					const chartDataSet = getChartData({
+						queryData: [{
+							query: 'q',
+							legend: '',
+							queryData: response.payload?.data?.result
+								? response.payload?.data?.result
+								: [],
+						}]
 					});
 				},
 				queryHash: `${query?.query}-${query?.legend}-${start}-${end}`,
@@ -226,6 +272,7 @@ interface DispatchProps {
 	deleteWidget: ({
 		widgetId,
 	}: DeleteWidgetProps) => (dispatch: Dispatch<AppActions>) => void;
+
 }
 
 interface GridCardGraphProps extends DispatchProps {
